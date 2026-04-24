@@ -1,125 +1,24 @@
-name: Deploy to Production
+name: Auto Deploy JojoApp (Simple)
 
 on:
   push:
-    branches: [ main ]
-    paths-ignore:
-      - '**.md'
-  workflow_dispatch:
-    inputs:
-      environment:
-        description: 'Target environment'
-        required: true
-        default: 'staging'
-        type: choice
-        options:
-          - staging
-          - production
-
-env:
-  REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
+    branches:
+      - main
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    environment:
-      name: ${{ github.event.inputs.environment || 'production' }}
-    permissions:
-      contents: read
-      packages: read
-    
-    steps:
-    - uses: actions/checkout@v4
-    
-    - name: Configure deployment environment
-      run: |
-        if [ "${{ github.event.inputs.environment }}" == "staging" ]; then
-          echo "DEPLOY_HOST=${{ secrets.STAGING_HOST }}" >> $GITHUB_ENV
-          echo "DEPLOY_USER=${{ secrets.STAGING_USER }}" >> $GITHUB_ENV
-          echo "DEPLOY_KEY=${{ secrets.STAGING_SSH_KEY }}" >> $GITHUB_ENV
-          echo "DEPLOY_PORT=${{ secrets.STAGING_SSH_PORT }}" >> $GITHUB_ENV
-          echo "DEPLOY_PATH=${{ secrets.STAGING_DEPLOY_PATH }}" >> $GITHUB_ENV
-        else
-          echo "DEPLOY_HOST=${{ secrets.PRODUCTION_HOST }}" >> $GITHUB_ENV
-          echo "DEPLOY_USER=${{ secrets.PRODUCTION_USER }}" >> $GITHUB_ENV
-          echo "DEPLOY_KEY=${{ secrets.PRODUCTION_SSH_KEY }}" >> $GITHUB_ENV
-          echo "DEPLOY_PORT=${{ secrets.PRODUCTION_SSH_PORT }}" >> $GITHUB_ENV
-          echo "DEPLOY_PATH=${{ secrets.PRODUCTION_DEPLOY_PATH }}" >> $GITHUB_ENV
-        fi
-    
-    - name: Wait for Docker builds
-      run: |
-        echo "Waiting for Docker image builds to complete..."
-        sleep 30
-    
-    - name: Setup SSH
-      run: |
-        mkdir -p ~/.ssh
-        echo "$DEPLOY_KEY" > ~/.ssh/deploy_key
-        chmod 600 ~/.ssh/deploy_key
-        ssh-keyscan -p $DEPLOY_PORT $DEPLOY_HOST >> ~/.ssh/known_hosts 2>/dev/null || true
-    
-    - name: Deploy via SSH
-      run: |
-        ssh -i ~/.ssh/deploy_key -p $DEPLOY_PORT $DEPLOY_USER@$DEPLOY_HOST << 'ENDSSH'
-          set -e
-          cd $DEPLOY_PATH
-          
-          # Pull latest code
-          git fetch origin
-          git checkout ${{ github.ref_name }}
-          git pull origin ${{ github.ref_name }}
-          
-          # Load environment variables
-          if [ -f .env ]; then
-            export $(cat .env | grep -v '#' | xargs)
-          fi
-          
-          # Pull latest images
-          docker-compose -f docker-compose.prod.yml pull
-          
-          # Run migrations
-          docker-compose -f docker-compose.prod.yml run --rm backend python manage.py migrate
-          
-          # Collect static files
-          docker-compose -f docker-compose.prod.yml run --rm backend python manage.py collectstatic --noinput
-          
-          # Restart services
-          docker-compose -f docker-compose.prod.yml up -d --remove-orphans
-          
-          # Verify deployment
-          sleep 10
-          curl -f http://localhost/health || exit 1
-        ENDSSH
-      env:
-        DEPLOY_PATH: ${{ env.DEPLOY_PATH }}
-    
-    - name: Verify deployment
-      run: |
-        echo "Deployment completed successfully!"
-        echo "Environment: ${{ github.event.inputs.environment || 'production' }}"
-        echo "Host: $DEPLOY_HOST"
-    
-    - name: Notify Slack (optional)
-      if: always()
-      uses: 8398a7/action-slack@v3
-      with:
-        status: ${{ job.status }}
-        text: 'Deployment to ${{ github.event.inputs.environment || "production" }} ${{ job.status }}'
-        webhook_url: ${{ secrets.SLACK_WEBHOOK }}
-        fields: repo,message,commit,author
-      if: ${{ secrets.SLACK_WEBHOOK != '' }}
 
-  rollback:
-    runs-on: ubuntu-latest
-    if: failure()
-    needs: deploy
-    environment:
-      name: ${{ github.event.inputs.environment || 'production' }}
-    
     steps:
-    - name: Notify rollback needed
-      run: |
-        echo "⚠️ Deployment failed. Rollback may be needed."
-        echo "SSH into your server and run: docker-compose -f docker-compose.prod.yml rollback"
+      - name: Deploy ke VPS via SSH
+        uses: appleboy/ssh-action@v0.1.6
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USERNAME }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            cd /root/jojoapp || git clone https://github.com/rokethom/jojoapps.git /root/jojoapp
+            cd /root/jojoapp
+            git pull origin main
+            docker compose down
+            docker compose up -d --build
