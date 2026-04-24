@@ -1,0 +1,5 @@
+{
+  "scripts": {
+    "dev": "concurrently \"cd backend && python manage.py runserver\" \"cd frontend-admin && npm start\" \"cd frontend-customer && npm start\" \"cd frontend-driver && npm start\""
+  }
+}

@@ -1,0 +1,9 @@
+@echo off
+REM Start Django ASGI server from backend folder
+REM Usage: start-asgi.bat
+cd /d %~dp0
+if not exist venv\Scripts\python.exe (
+  echo Python executable not found: venv\Scripts\python.exe
+  exit /b 1
+)
+venv\Scripts\python.exe -m uvicorn core.asgi:application --host 127.0.0.1 --port 8000 --reload
